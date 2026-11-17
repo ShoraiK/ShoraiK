@@ -1,0 +1,3 @@
+# tools/make_svgs.py writes every design here; the root holds the one named in PICK.
+designs/
+__pycache__/
