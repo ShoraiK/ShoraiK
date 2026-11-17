@@ -11,7 +11,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ShoraiK/NASpeed">
-    <img src="assets/naspeed.svg" width="100%" alt="Project: NASpeed, a multi-provider speed test for TerraMaster TOS 7, with Cloudflare, Ookla, M-Lab and LibreSpeed.">
+  <img src="https://raw.githubusercontent.com/ShoraiK/ShoraiK/report/report.svg" width="100%" alt="Shift report with my GitHub numbers, redrawn every night: commits and contributions in the last year, public repositories, stars earned, the year I joined, and my top languages by code size.">
+</p>
+
+<p align="center">
+  <a href="https://github.com/ShoraiK">
+    <img src="assets/connect.svg" width="50%" alt="Let's connect: a button to github.com/ShoraiK. Under it: replies are eventually consistent.">
   </a>
 </p>

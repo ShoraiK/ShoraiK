@@ -1,0 +1,38 @@
+# Redraws the shift report with fresh GitHub numbers every night. The card lives alone on the report branch,
+# which is force-pushed, so the bot never adds commits to main.
+name: Shift report
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches: [main]
+    paths: ["tools/make_svgs.py", ".github/workflows/report.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Draw the report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/make_svgs.py --report "$RUNNER_TEMP/report.svg"
+      - name: Publish it on the report branch
+        run: |
+          if git fetch --depth=1 origin +refs/heads/report:refs/remotes/origin/report &&
+             git show origin/report:report.svg | cmp -s - "$RUNNER_TEMP/report.svg"; then
+            echo "The numbers have not changed."
+            exit 0
+          fi
+          git switch --orphan report
+          cp "$RUNNER_TEMP/report.svg" report.svg
+          git add report.svg
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit --quiet -m "Draw the shift report"
+          git push --force origin report

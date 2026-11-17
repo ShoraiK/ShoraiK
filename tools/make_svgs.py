@@ -1,13 +1,19 @@
 """Generate the profile README and its pixel-art SVGs (SMIL animation) in three designs.
 
 Usage: python tools/make_svgs.py [PREVIEW_DIR]
+       python tools/make_svgs.py --report OUT_SVG
 Each design goes to designs/<name>/; the one named in PICK also goes to the root, which is what GitHub shows.
 With PREVIEW_DIR, it also writes there an HTML page that shows every design.
+With --report, it only draws the nightshift shift report from the live GitHub numbers (it needs a token in
+GITHUB_TOKEN); .github/workflows/report.yml runs it every night.
 """
+import json
+import os
 import pathlib
 import random
 import re
 import sys
+import urllib.request
 
 OUT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -60,6 +66,9 @@ FONT = {
     '"': [".#.#.", ".#.#.", ".....", ".....", ".....", ".....", "....."],
     "✦": ["..#..", "..#..", ".###.", "#####", ".###.", "..#..", "..#.."],
     "x": [".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#"],
+    "'": ["..#..", "..#..", ".....", ".....", ".....", ".....", "....."],
+    "/": ["....#", "....#", "...#.", "..#..", ".#...", "#....", "#...."],
+    "%": ["##...", "##..#", "...#.", "..#..", ".#...", "#..##", "...##"],
     "b": ["#....", "#....", "####.", "#...#", "#...#", "#...#", "####."],
     "c": [".....", ".....", ".###.", "#....", "#....", "#...#", ".###."],
     "f": ["..##.", ".#..#", ".#...", "###..", ".#...", ".#...", ".#..."],
@@ -515,29 +524,47 @@ def themed(svg, colors):
     return re.sub(r"#[0-9a-f]{6}", lambda m: colors.get(m.group(0), m.group(0)), svg)
 
 
+def card_open(W, H, label):
+    """Start a nightshift card: its frame, and the gradient its buttons glow with."""
+    return ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" '
+            'shape-rendering="crispEdges" role="img" aria-label="%s">' % (W, H, W, H, label),
+            '<defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffd76a"/>'
+            '<stop offset="1" stop-color="#ff7eb6"/></linearGradient></defs>',
+            '<rect width="%d" height="%d" fill="#160d2e"/>' % (W, H),
+            '<rect x="4" y="4" width="%d" height="%d" fill="none" stroke="#ff4f8b" stroke-width="8"/>' % (W - 8, H - 8),
+            '<rect x="16" y="16" width="%d" height="%d" fill="none" stroke="#7c5cff" stroke-width="4"/>'
+            % (W - 32, H - 32)]
+
+
+def card_title(mark, title, x, y):
+    """The blinking mark and the title of a card."""
+    return ('<g><path fill="#ffd76a" d="%s"/>%s</g><path fill="#ffd76a" d="%s"/>'
+            % (text_path(mark, x, y, 3), blink("1.6s", ".3;1"), text_path(title, x + 24, y, 3)))
+
+
+def button_width(icon, label, s):
+    return width(icon + " " + label, s) + 36
+
+
+def button(icon, label, x, y, s, font=FONT):
+    """A button with a glowing border: the icon in gold, then the label in white."""
+    w = button_width(icon, label, s)
+    return ('<rect x="%d" y="%d" width="%d" height="36" fill="url(#t)"><animate attributeName="opacity" '
+            'values="1;.35;1" dur="2s" repeatCount="indefinite"/></rect><rect x="%d" y="%d" width="%d" height="28" '
+            'fill="#2a1d52"/><path fill="#ffd76a" d="%s"/><path fill="#ffffff" d="%s"/>'
+            % (x, y, w, x + 4, y + 4, w - 8, text_path(icon, x + 18, y + 11, s),
+               text_path(label, x + 18 + 10 * s, y + 11, s, font=font)))
+
+
 def stack_trace(mark="◆"):
     """The stack as a joke Java stack trace: the AI could not replace the developer, and offers to fix its own bug."""
     W, H, S = 1200, 250, 2
     dim, text, error, link = "#a99bff", "#e8e3ff", "#ff7eb6", "#7cc6ff"
-    o = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" '
-         'shape-rendering="crispEdges" role="img" aria-label="Stack trace">' % (W, H, W, H)]
-    o.append('<defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffd76a"/>'
-             '<stop offset="1" stop-color="#ff7eb6"/></linearGradient></defs>')
-    o.append('<rect width="%d" height="%d" fill="#160d2e"/>' % (W, H))
-    o.append('<rect x="4" y="4" width="%d" height="%d" fill="none" stroke="#ff4f8b" stroke-width="8"/>' % (W - 8, H - 8))
-    o.append('<rect x="16" y="16" width="%d" height="%d" fill="none" stroke="#7c5cff" stroke-width="4"/>'
-             % (W - 32, H - 32))
-    o.append('<g><path fill="#ffd76a" d="%s"/>%s</g>' % (text_path(mark, 44, 40, 3), blink("1.6s", ".3;1")))
-    o.append('<path fill="#ffd76a" d="%s"/>' % text_path("STACK TRACE", 68, 40, 3))
+    o = card_open(W, H, "Stack trace")
+    o.append(card_title(mark, "STACK TRACE", 44, 40))
     # The AI's own button, eager to fix what the AI broke.
-    bw = width("✦ FIX WITH AI", S) + 36
-    bx = 1150 - bw
-    o.append('<rect x="%d" y="32" width="%d" height="36" fill="url(#t)"><animate attributeName="opacity" '
-             'values="1;.35;1" dur="2s" repeatCount="indefinite"/></rect><rect x="%d" y="36" width="%d" height="28" '
-             'fill="#2a1d52"/>' % (bx, bw, bx + 4, bw - 8))
-    o.append('<path fill="#ffd76a" d="%s"/><path fill="#ffffff" d="%s"/>'
-             % (text_path("✦", bx + 18, 43, S), text_path("FIX WITH AI", bx + 18 + 10 * S, 43, S)))
-    lines = [[('Exception in thread "main" ai.ReplacementException: could not replace developer - no Session', error)]]
+    o.append(button("✦", "FIX WITH AI", 1150 - button_width("✦", "FIX WITH AI", S), 32, S))
+    lines =[[('Exception in thread "main" ai.ReplacementException: could not replace developer - no Session', error)]]
     for where, source in (("backend.Java.spring", "Hibernate.java:42"), ("side.Python.javaScript", "Linux.java:7"),
                           ("home.SelfHosting.nas", "Uptime.java:247")):
         lines.append([("    at ", dim), (where, text), ("(", dim), (source, link), (")", dim)])
@@ -557,6 +584,94 @@ def stack_trace(mark="◆"):
              'dur="%.1fs"/></rect>' % (x + 4 * S, y, 5 * S, 7 * S, blink("1s"), .4 + .3 * len(lines)))
     o.append("</svg>")
     return "".join(o)
+
+
+def leader(label, value, x0, x1, y, s, color):
+    """A report line: the label, a dotted leader and the value flush right."""
+    start, end = x0 + width(label, s) + 3 * s, x1 - width(value, s) - 3 * s
+    dots = "".join("M%d %dh%dv%dh-%dz" % (x, y + 6 * s, s, s, s) for x in range(start, end - s + 1, 3 * s))
+    return ('<path fill="#e8e3ff" d="%s"/><path fill="#a99bff" d="%s"/><path fill="%s" d="%s"/>'
+            % (text_path(label, x0, y, s, font=LOW), dots, color, text_path(value, x1, y, s, "end", LOW)))
+
+
+def report(data, mark="◆"):
+    """The GitHub numbers as a shift report; .github/workflows/report.yml redraws it every night."""
+    W, H, S, gold = 1200, 250, 2, "#ffd76a"
+    o = card_open(W, H, "Shift report")
+    o.append(card_title(mark, "SHIFT REPORT", 44, 40))
+    o.append('<path fill="#a99bff" d="%s"/>'
+             % text_path("// github stats · updated nightly by cron", 1150, 44, S, "end", LOW))
+    left = [leader(label, str(value), 44, 560, 80 + 24 * k, S, gold) for k, (label, value) in enumerate((
+        ("COMMITS (LAST YEAR)", data["commits"]), ("CONTRIBUTIONS (LAST YEAR)", data["contributions"]),
+        ("PUBLIC REPOS", data["repos"]), ("STARS EARNED", data["stars"]), ("ON GITHUB SINCE", data["since"])))]
+    # The languages: a bar that fills up when its line prints (one segment per top language, then the rest),
+    # and the top three under it.
+    total = sum(size for _, size in data["languages"]) or 1
+    top = list(zip(data["languages"][:3], ("#ff7eb6", "#7cc6ff", "#5ee6a0")))
+    rest = total - sum(size for (_, size), _ in top)
+    bar, done = ['<rect x="640" y="104" width="510" height="14" fill="#2a1d52"/><g clip-path="url(#fill)">'], 0
+    for size, color in [(size, color) for (_, size), color in top] + [(rest, "#a99bff")]:
+        x0, done = 640 + round(510 * done / total), done + size
+        x1 = 640 + round(510 * done / total) - (S if done < total else 0)
+        if x1 > x0:
+            bar.append('<rect x="%d" y="104" width="%d" height="14" fill="%s"/>' % (x0, x1 - x0, color))
+    bar.append("</g>")
+    right = ['<path fill="#e8e3ff" d="%s"/>' % text_path("LANGUAGES BY CODE SIZE", 640, 80, S, font=LOW), "".join(bar)]
+    for k, ((name, size), color) in enumerate(top):
+        name = "".join(c for c in name.upper() if c in LOW or c == " ")
+        right.append('<rect x="640" y="%d" width="10" height="10" fill="%s"/>%s'
+                     % (130 + 24 * k, color, leader(name, "%d%%" % round(100 * size / total), 658, 1150,
+                                                    128 + 24 * k, S, gold)))
+    o.append('<defs><clipPath id="fill"><rect x="640" y="104" width="0" height="14"><animate attributeName="width" '
+             'from="0" to="510" begin=".65s" dur="1s" fill="freeze"/></rect></clipPath></defs>')
+    # The report prints one line at a time when the image loads, both columns together.
+    for k in range(5):
+        o.append('<g>%s%s<set attributeName="opacity" to="0" dur="%gs"/></g>'
+                 % (left[k], right[k] if k < len(right) else "", .4 + .25 * k))
+    o.append("</svg>")
+    return "".join(o)
+
+
+def connect(mark="◆"):
+    """The closing card: a button to the GitHub profile, and a backend promise under it."""
+    W, H, S = 600, 176, 2
+    o = card_open(W, H, "Let's connect")
+    o.append(card_title(mark, "LET'S CONNECT", (W - 24 - width("LET'S CONNECT", 3)) // 2, 36))
+    o.append(button("▶", "github.com/ShoraiK", (W - button_width("▶", "github.com/ShoraiK", S)) // 2, 74, S, LOW))
+    o.append('<path fill="#a99bff" d="%s"/>'
+             % text_path("replies are eventually consistent", W // 2, 126, S, "middle", LOW))
+    o.append("</svg>")
+    return "".join(o)
+
+
+def fetch_report(login):
+    """The numbers for the report, from the GitHub GraphQL API (the Action passes its token in GITHUB_TOKEN)."""
+    query = """query($login: String!) { user(login: $login) { createdAt
+      repositories(ownerAffiliations: OWNER, privacy: PUBLIC, isFork: false, first: 100) { totalCount
+        nodes { stargazerCount languages(first: 20) { edges { size node { name } } } } }
+      contributionsCollection { totalCommitContributions contributionCalendar { totalContributions } } } }"""
+    request = urllib.request.Request(
+        "https://api.github.com/graphql", json.dumps({"query": query, "variables": {"login": login}}).encode(),
+        {"Authorization": "bearer " + os.environ["GITHUB_TOKEN"], "User-Agent": "profile-report"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        answer = json.load(response)
+    if answer.get("errors") or not (answer.get("data") or {}).get("user"):
+        sys.exit("GitHub did not return the numbers: %s" % answer)
+    user = answer["data"]["user"]
+    repos, sizes = user["repositories"], {}
+    for repo in repos["nodes"]:
+        for edge in repo["languages"]["edges"]:
+            sizes[edge["node"]["name"]] = sizes.get(edge["node"]["name"], 0) + edge["size"]
+    contributions = user["contributionsCollection"]
+    return {"commits": contributions["totalCommitContributions"],
+            "contributions": contributions["contributionCalendar"]["totalContributions"],
+            "repos": repos["totalCount"], "stars": sum(repo["stargazerCount"] for repo in repos["nodes"]),
+            "since": user["createdAt"][:4], "languages": sorted(sizes.items(), key=lambda item: -item[1])}
+
+
+# Numbers for the local preview only; the Action draws the real report.
+SAMPLE = {"commits": 14, "contributions": 17, "repos": 4, "stars": 10, "since": "2015",
+          "languages": [("Python", 270569), ("JavaScript", 150759), ("CSS", 31540), ("HTML", 15406)]}
 
 
 README = """<p align="center">
@@ -597,6 +712,21 @@ OWN_STATS = {
                      "Linux; at home self-hosting on a NAS. Caused by ai.HallucinationException: Spring.makeItWork() "
                      "does not exist. In the corner, a Fix with AI button glows."),
 }
+# The nightshift design ends with the shift report and a card to connect, not the project card. The report lives
+# on the report branch, where the Action redraws it every night without adding commits to main.
+REPORT_URL = "https://raw.githubusercontent.com/ShoraiK/ShoraiK/report/report.svg"
+NASPEED_START = '<p align="center">\n  <a href="https://github.com/ShoraiK/NASpeed">'
+NIGHTSHIFT_END = """<p align="center">
+  <img src="%s" width="100%%" alt="Shift report with my GitHub numbers, redrawn every night: commits and contributions in the last year, public repositories, stars earned, the year I joined, and my top languages by code size.">
+</p>
+
+<p align="center">
+  <a href="https://github.com/ShoraiK">
+    <img src="assets/connect.svg" width="50%%" alt="Let's connect: a button to github.com/ShoraiK. Under it: replies are eventually consistent.">
+  </a>
+</p>
+""" % REPORT_URL
+assert NASPEED_START in README
 DESIGNS = {
     "1-synthwave": (banner, None, SYNTH_ALT),
     "2-dungeon": (banner_dungeon, ">",
@@ -617,30 +747,47 @@ h2{max-width:830px;margin:24px auto 8px;font-size:16px}
 .b img{max-width:100%}.b p{margin:0 0 16px}
 </style></head><body>{sections}</body></html>"""
 
-PREVIEW = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else None
-sections = []
-for name, (make_banner, mark, alt) in DESIGNS.items():
-    if mark is None:  # the first design, exactly as it was
-        readme, files = README, {"banner.svg": banner(), "stats.svg": stats(), "naspeed.svg": card()}
+def main(preview):
+    sections = []
+    for name, (make_banner, mark, alt) in DESIGNS.items():
+        if mark is None:  # the first design, exactly as it was
+            readme, files = README, {"banner.svg": banner(), "stats.svg": stats(), "naspeed.svg": card()}
+        else:
+            readme = README.replace(SYNTH_ALT, alt)
+            for old, new in PLAIN_README:
+                readme = readme.replace(old, new)
+            make_stats, stats_alt = OWN_STATS.get(name, (None, None))
+            if make_stats:
+                readme = readme.replace(PLAIN_README[1][1], stats_alt)
+            stats_svg = make_stats(mark) if make_stats else stats(mark, "STACK", ("ROLE", "MAIN", "SIDE"), False)
+            files = {"banner.svg": make_banner(), "stats.svg": themed(stats_svg, CARD_COLORS[name])}
+            if name == "3-nightshift":
+                readme = readme[:readme.index(NASPEED_START)] + NIGHTSHIFT_END
+                files["connect.svg"] = themed(connect(mark), CARD_COLORS[name])
+            else:
+                files["naspeed.svg"] = themed(card(mark, "PROJECT", "▶ VIEW REPO"), CARD_COLORS[name])
+        targets = [OUT / "designs" / name] + ([OUT] if name == PICK else []) + ([preview / name] if preview else [])
+        for target in targets:
+            (target / "assets").mkdir(parents=True, exist_ok=True)
+            for file, svg in files.items():
+                (target / "assets" / file).write_text(svg, encoding="utf-8", newline="\n")
+            (target / "README.md").write_text(readme, encoding="utf-8", newline="\n")
+        sections.append('<h2>%s</h2><div class="b">%s</div>'
+                        % (name, readme.replace('src="assets/', 'src="%s/assets/' % name)
+                           .replace(REPORT_URL, "%s/assets/report.svg" % name)))
+    if preview:
+        # The Action draws the real report; the preview draws it with sample numbers.
+        (preview / "3-nightshift" / "assets" / "report.svg").write_text(
+            themed(report(SAMPLE), CARD_COLORS["3-nightshift"]), encoding="utf-8", newline="\n")
+        (preview / "index.html").write_text(PAGE.replace("{sections}", "".join(sections)), encoding="utf-8")
+    for path in sorted(OUT.glob("**/*.svg")) + sorted(OUT.glob("**/README.md")):
+        print(path.relative_to(OUT).as_posix(), path.stat().st_size)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["--report"]:
+        drawn = report(fetch_report(os.environ.get("GITHUB_REPOSITORY_OWNER", "ShoraiK")))
+        pathlib.Path(sys.argv[2]).write_text(themed(drawn, CARD_COLORS["3-nightshift"]), encoding="utf-8",
+                                             newline="\n")
     else:
-        readme = README.replace(SYNTH_ALT, alt)
-        for old, new in PLAIN_README:
-            readme = readme.replace(old, new)
-        make_stats, stats_alt = OWN_STATS.get(name, (None, None))
-        if make_stats:
-            readme = readme.replace(PLAIN_README[1][1], stats_alt)
-        stats_svg = make_stats(mark) if make_stats else stats(mark, "STACK", ("ROLE", "MAIN", "SIDE"), False)
-        files = {"banner.svg": make_banner(), "stats.svg": themed(stats_svg, CARD_COLORS[name]),
-                 "naspeed.svg": themed(card(mark, "PROJECT", "▶ VIEW REPO"), CARD_COLORS[name])}
-    targets = [OUT / "designs" / name] + ([OUT] if name == PICK else []) + ([PREVIEW / name] if PREVIEW else [])
-    for target in targets:
-        (target / "assets").mkdir(parents=True, exist_ok=True)
-        for file, svg in files.items():
-            (target / "assets" / file).write_text(svg, encoding="utf-8", newline="\n")
-        (target / "README.md").write_text(readme, encoding="utf-8", newline="\n")
-    sections.append('<h2>%s</h2><div class="b">%s</div>'
-                    % (name, readme.replace('src="assets/', 'src="%s/assets/' % name)))
-if PREVIEW:
-    (PREVIEW / "index.html").write_text(PAGE.replace("{sections}", "".join(sections)), encoding="utf-8")
-for path in sorted(OUT.glob("**/*.svg")) + sorted(OUT.glob("**/README.md")):
-    print(path.relative_to(OUT).as_posix(), path.stat().st_size)
+        main(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else None)
